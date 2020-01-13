@@ -1,0 +1,221 @@
+<html>
+<head>
+    <title>Chat WebSocket</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.4.0/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/2.1.0/fingerprint2.js"></script>
+    <script type="text/javascript">
+        var stompClient = null;
+        var id = ''
+
+        function setConnected(connected) {
+            document.getElementById('connect').disabled = connected;
+            document.getElementById('disconnect').disabled = !connected;
+            document.getElementById('conversationDiv').style.visibility
+                = connected ? 'visible' : 'hidden';
+            document.getElementById('response').innerHTML = '';
+        }
+
+        function connect() {
+            Fingerprint2.get({}, function (components) {
+                var values = components.map(function (component) {
+                    return component.value
+                })
+                id = Fingerprint2.x64hash128(values.join(''), 31)
+                var elem = document.getElementById('id');
+                elem.textContent = id;
+                var socket = new SockJS('/game');
+                stompClient = Stomp.over(socket);
+                stompClient.connect({test: id}, function (frame) {
+                    setConnected(true);
+                    console.log('Connected: ' + frame);
+                    stompClient.subscribe('/feed/output', function (messageOutput) {
+                        //User `all chat` message
+                        let json = JSON.parse(messageOutput.body);
+                        switch (json.type) {
+                            case "LADDER": {
+                                showLadder(json.ladder);
+                                break;
+                            }
+                            case "ONLINE_LIST": {
+                                showOnline(json.data);
+                                break;
+                            }
+                        }
+                    });
+                    stompClient.subscribe('/private/' + id, function (messageOutput) {
+                        let json = JSON.parse(messageOutput.body);
+                        switch (json.type) {
+                            case "SCORE": {
+                                showMyScore(json.score);
+                                break;
+                            }
+                            case "LADDER": {
+                                showLadder(json.ladder);
+                                break;
+                            }
+                            case "ONLINE_LIST": {
+                                showOnline(json.data);
+                                break;
+                            }
+                            case "BATTLE": {
+                                showBattle(json.match);
+                                break;
+                            }
+                            case "DECLINE_BATTLE": {
+                                declineBattle(json.match);
+                                break;
+                            }
+                            case "BATTLE_ACCEPTED": {
+                                battleAccepted(json.match);
+                                break;
+                            }
+                            case "BATTLE_COMPLETE": {
+                                battleComplete(json.match);
+                                break;
+                            }
+                        }
+                    });
+                });
+            })
+        }
+
+        function ranked() {
+            stompClient.send("/app/input", {},
+                JSON.stringify({'type': 'START_MM'}));
+            var temp = document.getElementById('MM');
+            temp.innerHTML = "<button onclick=\"cancelRanked();\">STOP MM</button>";
+        }
+        function cancelRanked() {
+            stompClient.send("/app/input", {},
+                JSON.stringify({'type': 'STOP_MM'}));
+            var temp = document.getElementById('MM');
+            temp.innerHTML = "<button onclick=\"ranked();\">RANKED</button>";
+        }
+
+        function battleComplete(match) {
+            var temp = document.getElementById(match.id);
+            temp.innerHTML = ("ID - " + match.id + " WINNER > " + match.winner + "<button onclick=\"okay(" + match.id + ");\">Okay</button>");
+        }
+
+        function okay(id) {
+            document.getElementById(id).remove();
+        }
+
+        function battleAccepted(match) {
+            if (id === match.by) {
+                document.getElementById(match.id + "A").remove()
+            } else {
+                var temp = document.getElementById(match.id);
+                temp.innerHTML = temp.innerHTML + " ACCEPTED by opponent"
+            }
+        }
+
+        function declineBattle(match) {
+            document.getElementById(match.id).remove();
+        }
+
+        function showBattle(match) {
+            var div = document.getElementById('matches');
+            var temp = document.createElement('div');
+            temp.id = match.id;
+            temp.style.wordWrap = 'break-word';
+            temp.innerHTML = ("ID - " + match.id + " Opponent > " + match.with + " <button id=\"" + match.id + "A\" onclick=\"acceptMatch(" + match.id + ");\">Accept</button><button onclick=\"declineMatch(" + match.id + ");\">Decline</button>");
+            div.appendChild(temp);
+        }
+
+        function acceptMatch(id) {
+            stompClient.send("/app/input", {},
+                JSON.stringify({'type': 'ACCEPT_BATTLE', 'id': id}));
+        }
+
+        function declineMatch(id) {
+            stompClient.send("/app/input", {},
+                JSON.stringify({'type': 'DECLINE_BATTLE', 'id': id}));
+        }
+
+        function disconnect() {
+            if (stompClient != null) {
+                stompClient.disconnect();
+            }
+            setConnected(false);
+            console.log("Disconnected");
+        }
+
+        function showLadder(ladder) {
+            var div = document.getElementById('ladder');
+            div.innerHTML = '';
+            Object.entries(ladder)
+                .forEach(([key, value]) => {
+                    var temp = document.createElement('div');
+                    temp.style.wordWrap = 'break-word';
+                    temp.appendChild(document.createTextNode(key + " > " + value));
+                    div.appendChild(temp);
+                })
+        }
+
+        function showMyScore(number) {
+            var score = document.getElementById('score');
+            score.textContent = number;
+        }
+
+        function showOnline(data) {
+            var div = document.getElementById('online');
+            div.innerHTML = '';
+            data.forEach(item => {
+                var temp = document.createElement('div');
+                temp.style.wordWrap = 'break-word';
+                temp.appendChild(document.createTextNode(item));
+                div.appendChild(temp);
+            })
+        }
+
+        function sendMessage() {
+            var text = document.getElementById('text').value;
+            stompClient.send("/app/input", {},
+                JSON.stringify({'type': 'CHALLENGE', 'user': text}));
+        }
+    </script>
+</head>
+<body onload="disconnect()">
+<div>
+    <div>
+        You - <span id="id"></span>
+    </div>
+    <div>
+        Your score - <span id="score">0</span>
+    </div>
+    <div>
+        Ladder
+        <div id="ladder"></div>
+    </div>
+    <div>
+        Online
+        <div id="online"></div>
+    </div>
+    <br/>
+    <div>
+        <button id="connect" onclick="connect();">Connect</button>
+        <button id="disconnect" disabled="disabled" onclick="disconnect();">
+            Disconnect
+        </button>
+    </div>
+    <br/>
+    <div id="MM">
+        <button onclick="ranked();">RANKED</button>
+    </div>
+    <br/>
+    <div>
+        Matches
+        <div id="matches"></div>
+    </div>
+    <br/>
+    <div id="conversationDiv">
+        <input type="text" id="text" placeholder="Write a message..."/>
+        <button id="sendMessage" onclick="sendMessage();">Send</button>
+        <p id="response"></p>
+    </div>
+</div>
+
+</body>
+</html>
